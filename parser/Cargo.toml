@@ -1,0 +1,10 @@
+[package]
+name = "parser"
+version = "0.1.0"
+authors = ["Isaac Elliott <isaace71295@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+lexer = { path = "../lexer" }
+ast = { path = "../ast" }
+bit-set = "0.5.1"
