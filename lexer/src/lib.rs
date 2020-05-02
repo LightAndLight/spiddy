@@ -121,7 +121,7 @@ impl<'src> Lexer<'src> {
 
     fn next_char(&mut self) -> Option<char> {
         self.position.next().map(|c| {
-            self.offset.add(c.len_utf8().try_into().unwrap());
+            self.offset.add_mut(c.len_utf8().try_into().unwrap());
             c
         })
     }
