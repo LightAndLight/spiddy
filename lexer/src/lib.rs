@@ -1,13 +1,7 @@
+use span::{Offset, SourceFile};
+use std::convert::TryInto;
 use std::iter::Peekable;
 use std::str::Chars;
-use std::string::String;
-
-#[derive(Debug, PartialEq, Eq)]
-pub struct Pos<'src> {
-    filename: Option<&'src str>,
-    line: usize,
-    column: usize,
-}
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum TokenType {
@@ -84,20 +78,10 @@ impl<'src> Token<'src> {
 }
 
 pub struct Lexer<'src> {
-    filename: Option<&'src str>,
-    input: &'src str,
+    src_file: &'src SourceFile,
     position: Peekable<Chars<'src>>,
-    offset: usize,
-    line: usize,
-    column: usize,
-}
-
-#[inline]
-fn is_newline(c: char) -> bool {
-    match c {
-        '\n' => true,
-        _ => false,
-    }
+    /// offset in bytes; *not* characters (we assume UTF-8 encoding)
+    offset: Offset,
 }
 
 #[inline]
@@ -111,61 +95,38 @@ fn is_ident_body(c: &char) -> bool {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum Error<'src> {
-    Unexpected(char, Pos<'src>),
-    UnexpectedEof(Pos<'src>),
+pub enum Error {
+    Unexpected(char, Offset),
+    UnexpectedEof(Offset),
 }
 
-pub type LexerResult<'src, T> = Result<T, Error<'src>>;
+pub type LexerResult<T> = Result<T, Error>;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum NextToken<'src> {
     Done,
     Token(Token<'src>),
-    Error(Error<'src>),
+    Error(Error),
 }
 
 impl<'src> Lexer<'src> {
-    pub fn from_string(input: &'src String) -> Self {
-        let position = input.chars().peekable();
+    pub fn from_source_file(src_file: &'src SourceFile) -> Self {
+        let position = src_file.data().chars().peekable();
         Lexer {
-            filename: Option::None,
-            input: input.as_str(),
+            src_file,
             position,
-            offset: 0,
-            line: 0,
-            column: 0,
-        }
-    }
-
-    #[inline]
-    pub fn set_filename(&mut self, filename: &'src String) {
-        self.filename = Option::Some(filename)
-    }
-
-    #[inline]
-    fn get_pos(&self) -> Pos<'src> {
-        Pos {
-            filename: self.filename,
-            line: self.line,
-            column: self.column,
+            offset: src_file.get_start(),
         }
     }
 
     fn next_char(&mut self) -> Option<char> {
         self.position.next().map(|c| {
-            self.offset += 1;
-            if is_newline(c) {
-                self.line += 1;
-                self.column = 0
-            } else {
-                self.column += 1
-            };
+            self.offset.add(c.len_utf8().try_into().unwrap());
             c
         })
     }
 
-    fn consume_ident_body(&mut self, start_offset: usize) -> Token<'src> {
+    fn consume_ident_body(&mut self, start_offset: Offset) -> Token<'src> {
         while let Some(c) = self.position.peek() {
             if !is_ident_body(c) {
                 break;
@@ -173,15 +134,15 @@ impl<'src> Lexer<'src> {
             self.next_char();
         }
         let end_offset = self.offset;
-        Token::Ident(&self.input[start_offset..end_offset])
+        Token::Ident(&self.src_file.data()[start_offset.to_usize()..end_offset.to_usize()])
     }
 
-    fn unexpected(&self, c: char) -> Error<'src> {
-        Error::Unexpected(c, self.get_pos())
+    fn unexpected(&self, c: char) -> Error {
+        Error::Unexpected(c, self.offset)
     }
 
-    fn unexpected_eof(&self) -> Error<'src> {
-        Error::UnexpectedEof(self.get_pos())
+    fn unexpected_eof(&self) -> Error {
+        Error::UnexpectedEof(self.offset)
     }
 
     fn next_token(&mut self) -> NextToken<'src> {
@@ -210,7 +171,7 @@ impl<'src> Lexer<'src> {
         }
     }
 
-    pub fn tokenize(mut self) -> LexerResult<'src, Vec<Token<'src>>> {
+    pub fn tokenize(mut self) -> LexerResult<Vec<Token<'src>>> {
         let mut tokens = Vec::new();
         loop {
             match self.next_token() {
@@ -230,28 +191,38 @@ impl<'src> Lexer<'src> {
     }
 }
 
+#[cfg(test)]
+fn test_source_file(content: String) -> SourceFile {
+    SourceFile {
+        name: String::from("test"),
+        start: Offset(0),
+        content,
+    }
+}
+
 #[test]
 fn test_lexer_example1() {
+    let src_file = test_source_file(String::from("->"));
     assert_eq!(
-        Lexer::from_string(&String::from("->")).next_token(),
+        Lexer::from_source_file(&src_file).next_token(),
         NextToken::Token(Token::RArrow)
     );
 }
 
 #[test]
 fn test_lexer_example2() {
+    let src_file = test_source_file(String::from("hello"));
     assert_eq!(
-        Lexer::from_string(&String::from("hello")).next_token(),
+        Lexer::from_source_file(&src_file).next_token(),
         NextToken::Token(Token::Ident("hello"))
     );
 }
 
 #[test]
 fn test_lexer_example3() {
-    let input = String::from("f = \\input -> input");
-    let lexer = Lexer::from_string(&input);
+    let src_file = test_source_file(String::from("f = \\input -> input"));
     assert_eq!(
-        lexer.tokenize(),
+        Lexer::from_source_file(&src_file).tokenize(),
         Result::Ok(vec![
             Token::Ident("f"),
             Token::Space,
@@ -270,27 +241,18 @@ fn test_lexer_example3() {
 
 #[test]
 fn test_lexer_example4() {
-    let input = String::from("  aa");
-    let lexer = Lexer::from_string(&input);
+    let src_file = test_source_file(String::from("  aa"));
     assert_eq!(
-        lexer.tokenize(),
-        Result::Err(Error::Unexpected(
-            '',
-            Pos {
-                filename: Option::None,
-                line: 0,
-                column: 5
-            }
-        ))
+        Lexer::from_source_file(&src_file).tokenize(),
+        Result::Err(Error::Unexpected('', Offset(5)))
     );
 }
 
 #[test]
 fn test_lexer_example5() {
-    let input = String::from("  aa\naa");
-    let lexer = Lexer::from_string(&input);
+    let src_file = test_source_file(String::from("  aa\naa"));
     assert_eq!(
-        lexer.tokenize(),
+        Lexer::from_source_file(&src_file).tokenize(),
         Result::Ok(vec![
             Token::Space,
             Token::Space,
@@ -304,17 +266,9 @@ fn test_lexer_example5() {
 
 #[test]
 fn test_lexer_example6() {
-    let input = String::from("  aa\na");
-    let lexer = Lexer::from_string(&input);
+    let src_file = test_source_file(String::from("  aa\na"));
     assert_eq!(
-        lexer.tokenize(),
-        Result::Err(Error::Unexpected(
-            '',
-            Pos {
-                filename: Option::None,
-                line: 1,
-                column: 2
-            }
-        ))
+        Lexer::from_source_file(&src_file).tokenize(),
+        Result::Err(Error::Unexpected('', Offset(7)))
     );
 }

@@ -4,13 +4,38 @@ use std::io::Read;
 use std::path::Path;
 
 /// An address into `SourceFiles`
-#[derive(Clone, Copy)]
-pub struct Offset(u32);
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Offset(pub u32);
 
-struct SourceFile {
-    name: String,
-    start: Offset,
-    content: String,
+impl Offset {
+    #[inline]
+    pub fn add(&mut self, n: u32) {
+        self.0 += n
+    }
+
+    #[inline]
+    pub fn to_usize(self) -> usize {
+        self.0 as usize
+    }
+}
+
+pub struct SourceFile {
+    pub name: String,
+    pub start: Offset,
+    pub content: String,
+}
+
+impl SourceFile {
+    #[inline]
+    pub fn get_start(&self) -> Offset {
+        self.start
+    }
+}
+
+impl SourceFile {
+    pub fn data<'src>(&'src self) -> &'src str {
+        &self.content
+    }
 }
 
 pub struct SourceFiles {

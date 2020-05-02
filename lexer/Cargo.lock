@@ -3,4 +3,11 @@
 [[package]]
 name = "lexer"
 version = "0.1.0"
+dependencies = [
+ "span 0.1.0",
+]
+
+[[package]]
+name = "span"
+version = "0.1.0"
 
