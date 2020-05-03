@@ -34,6 +34,7 @@ impl Offset {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Span {
     pub start: Offset,
     pub length: Offset,
@@ -47,6 +48,8 @@ impl Span {
 }
 
 #[derive(Debug)]
+/// `SourceFile` is exposed for testing, but these should generally be obtained by reference using
+/// `SourceFiles`
 pub struct SourceFile {
     pub name: String,
     pub start: Offset,
@@ -156,23 +159,29 @@ impl SourceFiles {
     }
 
     #[inline]
-    fn __new_source_file(&mut self, name: String, size: usize, content: String) -> Offset {
+    fn __new_source_file(
+        &mut self,
+        name: String,
+        size: usize,
+        content: String,
+    ) -> (Offset, String) {
         let start = self.next_addr;
         self.next_addr = start.add(size.try_into().unwrap());
+        let name_copy = name.clone();
         let src_file = SourceFile {
             name,
             start,
             content,
         };
         self.files.push(src_file);
-        start
+        (start, name_copy)
     }
 
     pub fn new_source_file(&mut self, name: String, content: String) -> Offset {
-        self.__new_source_file(name, content.len(), content)
+        self.__new_source_file(name, content.len(), content).0
     }
 
-    pub fn load_source_file(&mut self, path: &Path) -> Offset {
+    pub fn load_source_file<'files>(&'files mut self, path: &Path) -> (Offset, String) {
         let mut content = String::new();
         match __open_and_read(path, &mut content) {
             Result::Err(err) => panic!("load_source_file failed: {}", err),
@@ -184,13 +193,22 @@ impl SourceFiles {
 
     pub fn get_by_offset<'src>(&'src self, offset: Offset) -> &'src SourceFile {
         if offset >= self.next_addr {
-            panic!("get_by_offset_failed: offset out of bounds")
+            panic!("get_by_offset failed: offset out of bounds")
         }
         let ix = match self.files.binary_search_by_key(&offset, |file| file.start) {
             Result::Ok(ix) => ix,
             Result::Err(ix) => ix - 1,
         };
         &self.files[ix]
+    }
+
+    pub fn get_by_name<'src>(&'src self, name: &str) -> &'src SourceFile {
+        for file in self.files.iter() {
+            if file.name == name {
+                return &file;
+            }
+        }
+        panic!("get_by_name failed: no name {:?} found", name)
     }
 }
 

@@ -1,20 +1,46 @@
 use ast::Expr;
 use bit_set::BitSet;
-use lexer::{Lexer, Token, TokenType};
-use std::fmt::Debug;
+use errors::Highlight;
+#[cfg(test)]
+use lexer::Lexer;
+use lexer::{Token, TokenData, TokenType};
+use span::Offset;
+#[cfg(test)]
+use span::{SourceFile, Span};
+use std::fmt::{Debug, Display};
 use std::iter::Peekable;
 use std::slice::Iter;
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum ParseError<'src, 'tokens> {
-    UnexpectedEof,
+pub enum Error<'src, 'tokens> {
+    UnexpectedEof(Offset),
     Unexpected {
         actual: &'tokens Token<'src>,
-        expected: Vec<TokenType>,
+        expected: ExpectedSet,
     },
 }
 
-#[derive(Clone)]
+impl<'src, 'tokens> Error<'src, 'tokens> {
+    pub fn reportable(&self) -> errors::Error {
+        match self {
+            Error::UnexpectedEof(offset) => errors::Error {
+                highlight: Highlight::Point(*offset),
+                message: String::from("Unexpected end of input"),
+            },
+
+            Error::Unexpected { actual, expected } => errors::Error {
+                highlight: Highlight::Span(actual.span),
+                message: format!(
+                    "Unexpected {}, expecting one of: {}",
+                    actual.token_type(),
+                    expected
+                ),
+            },
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
 pub struct ExpectedSet {
     bits: BitSet,
 }
@@ -51,6 +77,27 @@ impl ExpectedSet {
             .iter()
             .map(|i| TokenType::unsafe_from_usize(i))
             .collect()
+    }
+}
+
+impl Display for ExpectedSet {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
+        let vec = self.as_vec();
+        let mut items = vec.iter();
+        let () = match items.next() {
+            Option::None => Result::Ok(()),
+            Option::Some(item) => Display::fmt(item, formatter),
+        }?;
+
+        let mut result = Result::Ok(());
+        for item in items {
+            result?;
+            formatter.write_str(", ")?;
+            Display::fmt(item, formatter)?;
+            result = Result::Ok(());
+        }
+
+        result
     }
 }
 
@@ -142,7 +189,7 @@ macro_rules! with_follows_extended {
     }};
 }
 
-pub type ParseResult<'src, 'tokens, T> = Result<T, ParseError<'src, 'tokens>>;
+pub type ParseResult<'src, 'tokens, T> = Result<T, Error<'src, 'tokens>>;
 
 pub struct Parser<'src, 'tokens> {
     position: Peekable<Iter<'tokens, Token<'src>>>,
@@ -152,6 +199,7 @@ pub struct Parser<'src, 'tokens> {
 }
 
 impl<'src, 'tokens> Parser<'src, 'tokens> {
+    /// `input` must be terminated by a `TokenType::Eof`
     pub fn new(input: &'tokens Vec<Token<'src>>) -> Self {
         let expected = ExpectedSet::new();
         let follows = Vec::new();
@@ -169,7 +217,7 @@ impl<'src, 'tokens> Parser<'src, 'tokens> {
     fn current_token(&mut self) -> &'tokens Token<'src> {
         match self.position.peek() {
             Option::Some(token) => token,
-            Option::None => &Token::Eof,
+            Option::None => panic!("current_token failed: ran out of input"),
         }
     }
 
@@ -197,8 +245,10 @@ impl<'src, 'tokens> Parser<'src, 'tokens> {
     fn unexpected_with<T>(&mut self, extra: &ExpectedSet) -> ParseResult<'src, 'tokens, T> {
         let actual = self.current_token();
         self.expected.union(extra);
-        let expected = self.expected.as_vec();
-        Result::Err(ParseError::Unexpected { actual, expected })
+        Result::Err(Error::Unexpected {
+            actual,
+            expected: self.expected.clone(),
+        })
     }
 
     #[inline]
@@ -208,8 +258,8 @@ impl<'src, 'tokens> Parser<'src, 'tokens> {
 
     fn expect_ident(&mut self) -> Option<&'src str> {
         self.expect(&TokenType::Ident)
-            .and_then(|token| match *token {
-                Token::Ident(ident) => Option::Some(ident),
+            .and_then(|token| match token.data {
+                TokenData::Ident(ident) => Option::Some(ident),
                 _ => Option::None,
             })
     }
@@ -233,7 +283,7 @@ impl<'src, 'tokens> Parser<'src, 'tokens> {
 
     fn ignore_spaces(&mut self) -> usize {
         let mut count = 0;
-        while let Token::Space = self.current_token() {
+        while let TokenData::Space | TokenData::Newline = self.current_token().data {
             let _ = self.consume();
             count += 1;
         }
@@ -260,6 +310,7 @@ impl<'src, 'tokens> Parser<'src, 'tokens> {
                             .parse_expr())?;
 
                     let _ = self.require(&TokenType::RParen)?;
+                    let _ = self.ignore_spaces();
 
                     Result::Ok(Option::Some(Expr::Parens(Box::new(inner))))
                 }
@@ -351,7 +402,7 @@ impl<'src, 'tokens> Parser<'src, 'tokens> {
         }
     }
 
-    fn parse_expr_eof(&mut self) -> ParseResult<'src, 'tokens, Expr<'src>> {
+    pub fn parse_expr_eof(&mut self) -> ParseResult<'src, 'tokens, Expr<'src>> {
         let mut followed_by = ExpectedSet::new();
         followed_by.insert(&TokenType::Eof);
         self.follows.push(followed_by);
@@ -362,8 +413,13 @@ impl<'src, 'tokens> Parser<'src, 'tokens> {
 }
 
 #[cfg(test)]
-fn test_parser<'src>(input: &'src String, expected: Expr<'src>) {
-    let lexer_res = Lexer::from_string(input).tokenize();
+fn test_parser<'src>(input: String, expected: Expr<'src>) {
+    let source_file = SourceFile {
+        name: String::from("test"),
+        start: Offset(0),
+        content: input,
+    };
+    let lexer_res = Lexer::from_source_file(&source_file).tokenize();
     match lexer_res {
         Result::Ok(ref tokens) => {
             assert_eq!(Parser::new(tokens).parse_expr_eof(), Result::Ok(expected))
@@ -373,8 +429,13 @@ fn test_parser<'src>(input: &'src String, expected: Expr<'src>) {
 }
 
 #[cfg(test)]
-fn test_parser_fail<'src, 'tokens>(input: &'src String, expected: ParseError<'src, 'tokens>) {
-    let lexer_res = Lexer::from_string(input).tokenize();
+fn test_parser_fail<'src, 'tokens>(input: String, expected: Error<'src, 'tokens>) {
+    let source_file = SourceFile {
+        name: String::from("test"),
+        start: Offset(0),
+        content: input,
+    };
+    let lexer_res = Lexer::from_source_file(&source_file).tokenize();
     match lexer_res {
         Result::Ok(ref tokens) => {
             assert_eq!(Parser::new(tokens).parse_expr_eof(), Result::Err(expected))
@@ -386,20 +447,20 @@ fn test_parser_fail<'src, 'tokens>(input: &'src String, expected: ParseError<'sr
 #[test]
 fn test_parser_ident() {
     let input = String::from("hello");
-    test_parser(&input, Expr::Ident("hello"))
+    test_parser(input, Expr::Ident("hello"))
 }
 
 #[test]
 fn test_parser_lambda() {
     let input = String::from("\\x -> x");
-    test_parser(&input, Expr::Lam("x", Box::new(Expr::Ident("x"))))
+    test_parser(input, Expr::Lam("x", Box::new(Expr::Ident("x"))))
 }
 
 #[test]
 fn test_parser_app_2() {
     let input = String::from("x x");
     test_parser(
-        &input,
+        input,
         Expr::App(Box::new(Expr::Ident("x")), Box::new(Expr::Ident("x"))),
     )
 }
@@ -410,7 +471,7 @@ fn test_parser_app_4() {
     let head = Expr::Ident("what");
     let tail = vec!["is", "love", "baby"];
     test_parser(
-        &input,
+        input,
         tail.into_iter().fold(head, |acc, x| {
             Expr::App(Box::new(acc), Box::new(Expr::Ident(x)))
         }),
@@ -421,10 +482,16 @@ fn test_parser_app_4() {
 fn test_parser_app_fail1() {
     let input = String::from("x \\y -> y");
     test_parser_fail(
-        &input,
-        ParseError::Unexpected {
-            actual: &Token::Backslash,
-            expected: vec![TokenType::Ident, TokenType::LParen, TokenType::Eof],
+        input,
+        Error::Unexpected {
+            actual: &Token {
+                data: TokenData::Backslash,
+                span: Span {
+                    start: Offset(2),
+                    length: Offset(1),
+                },
+            },
+            expected: expected![&TokenType::Ident, &TokenType::LParen, &TokenType::Eof],
         },
     )
 }
@@ -433,10 +500,16 @@ fn test_parser_app_fail1() {
 fn test_parser_app_fail2() {
     let input = String::from("(x \\y -> y)");
     test_parser_fail(
-        &input,
-        ParseError::Unexpected {
-            actual: &Token::Backslash,
-            expected: vec![TokenType::Ident, TokenType::LParen, TokenType::RParen],
+        input,
+        Error::Unexpected {
+            actual: &Token {
+                data: TokenData::Backslash,
+                span: Span {
+                    start: Offset(3),
+                    length: Offset(1),
+                },
+            },
+            expected: expected![&TokenType::Ident, &TokenType::LParen, &TokenType::RParen],
         },
     );
 }
@@ -445,10 +518,16 @@ fn test_parser_app_fail2() {
 fn test_parser_app_fail3() {
     let input = String::from("x y \\z -> z");
     test_parser_fail(
-        &input,
-        ParseError::Unexpected {
-            actual: &Token::Backslash,
-            expected: vec![TokenType::Ident, TokenType::LParen, TokenType::Eof],
+        input,
+        Error::Unexpected {
+            actual: &Token {
+                data: TokenData::Backslash,
+                span: Span {
+                    start: Offset(4),
+                    length: Offset(1),
+                },
+            },
+            expected: expected![&TokenType::Ident, &TokenType::LParen, &TokenType::Eof],
         },
     );
 }
@@ -457,10 +536,16 @@ fn test_parser_app_fail3() {
 fn test_parser_app_fail4() {
     let input = String::from("(x y \\z -> z)");
     test_parser_fail(
-        &input,
-        ParseError::Unexpected {
-            actual: &Token::Backslash,
-            expected: vec![TokenType::Ident, TokenType::LParen, TokenType::RParen],
+        input,
+        Error::Unexpected {
+            actual: &Token {
+                data: TokenData::Backslash,
+                span: Span {
+                    start: Offset(5),
+                    length: Offset(1),
+                },
+            },
+            expected: expected![&TokenType::Ident, &TokenType::LParen, &TokenType::RParen],
         },
     );
 }
@@ -468,5 +553,5 @@ fn test_parser_app_fail4() {
 #[test]
 fn test_parser_parens() {
     let input = String::from("(x)");
-    test_parser(&input, Expr::Parens(Box::new(Expr::Ident("x"))))
+    test_parser(input, Expr::Parens(Box::new(Expr::Ident("x"))))
 }

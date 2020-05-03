@@ -30,9 +30,9 @@ impl Highlight {
     }
 }
 
-pub struct Error<'msg> {
+pub struct Error {
     pub highlight: Highlight,
-    pub message: &'msg str,
+    pub message: String,
 }
 
 fn highlight<'src>(line: &'src str, line_offset: Offset, region: Highlight) -> String {
@@ -78,7 +78,7 @@ fn highlight<'src>(line: &'src str, line_offset: Offset, region: Highlight) -> S
     string
 }
 
-pub fn __build_report<'msg>(src_files: &SourceFiles, error: Error<'msg>) -> [String; 5] {
+pub fn __build_report(src_files: &SourceFiles, error: Error) -> [String; 5] {
     let error_start = error.highlight.start();
     let src_file = src_files.get_by_offset(error_start);
     let line = src_file.get_line(error_start);
@@ -113,13 +113,15 @@ pub fn __build_report<'msg>(src_files: &SourceFiles, error: Error<'msg>) -> [Str
     [line0, line1, line2, line3, line4]
 }
 
-pub fn report<'msg>(src_files: &SourceFiles, error: Error<'msg>) {
-    let [line0, line1, line2, line3, line4] = __build_report(src_files, error);
-    let _ = io::stdout().write(line0.as_bytes()).unwrap();
-    let _ = io::stdout().write(line1.as_bytes()).unwrap();
-    let _ = io::stdout().write(line2.as_bytes()).unwrap();
-    let _ = io::stdout().write(line3.as_bytes()).unwrap();
-    let _ = io::stdout().write(line4.as_bytes()).unwrap();
+impl Error {
+    pub fn report(self, src_files: &SourceFiles) {
+        let [line0, line1, line2, line3, line4] = __build_report(src_files, self);
+        let _ = io::stdout().write(line0.as_bytes()).unwrap();
+        let _ = io::stdout().write(line1.as_bytes()).unwrap();
+        let _ = io::stdout().write(line2.as_bytes()).unwrap();
+        let _ = io::stdout().write(line3.as_bytes()).unwrap();
+        let _ = io::stdout().write(line4.as_bytes()).unwrap();
+    }
 }
 
 #[test]
@@ -135,7 +137,7 @@ fn test_build_report1() {
             &src_files,
             Error {
                 highlight: Highlight::Point(Offset(8)),
-                message: "Message"
+                message: String::from("Message")
             }
         ),
         [
@@ -166,7 +168,7 @@ fn test_build_report2() {
             &src_files,
             Error {
                 highlight: Highlight::Point(Offset(aim as u32)),
-                message: "Message"
+                message: String::from("Message")
             }
         ),
         [

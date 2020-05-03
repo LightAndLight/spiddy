@@ -1,5 +1,5 @@
 [package]
-name = "spiddy"
+name = "compiler"
 version = "0.1.0"
 authors = ["Isaac Elliott <isaace71295@gmail.com>"]
 edition = "2018"
@@ -9,3 +9,4 @@ edition = "2018"
 [dependencies]
 lexer = { path = "../lexer" }
 parser = { path = "../parser" }
+span = { path = "../span" }

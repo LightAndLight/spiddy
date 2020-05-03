@@ -18,6 +18,15 @@ version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
+name = "compiler"
+version = "0.1.0"
+dependencies = [
+ "lexer 0.1.0",
+ "parser 0.1.0",
+ "span 0.1.0",
+]
+
+[[package]]
 name = "errors"
 version = "0.1.0"
 dependencies = [

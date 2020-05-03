@@ -5,6 +5,8 @@ authors = ["Isaac Elliott <isaace71295@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-lexer = { path = "../lexer" }
-ast = { path = "../ast" }
 bit-set = "0.5.1"
+ast = { path = "../ast" }
+errors = { path = "../errors" }
+lexer = { path = "../lexer" }
+span = { path = "../span" }

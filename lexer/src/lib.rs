@@ -1,5 +1,7 @@
-use span::{Offset, SourceFile};
+use errors::Highlight;
+use span::{Offset, SourceFile, Span};
 use std::convert::TryInto;
+use std::fmt::Display;
 use std::iter::Peekable;
 use std::str::Chars;
 
@@ -14,6 +16,22 @@ pub enum TokenType {
     RParen,
     Equals,
     Eof,
+}
+
+impl Display for TokenType {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
+        formatter.write_str(match self {
+            TokenType::Space => "' '",
+            TokenType::Newline => "newline",
+            TokenType::Backslash => "'\\'",
+            TokenType::Ident => "identifier",
+            TokenType::RArrow => "'->'",
+            TokenType::LParen => "'('",
+            TokenType::RParen => "')'",
+            TokenType::Equals => "'='",
+            TokenType::Eof => "end of input",
+        })
+    }
 }
 
 impl TokenType {
@@ -48,7 +66,7 @@ impl TokenType {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum Token<'src> {
+pub enum TokenData<'src> {
     Space,
     Newline,
     Backslash,
@@ -60,19 +78,25 @@ pub enum Token<'src> {
     Eof,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub struct Token<'src> {
+    pub data: TokenData<'src>,
+    pub span: Span,
+}
+
 impl<'src> Token<'src> {
     #[inline]
     pub fn token_type(&self) -> TokenType {
-        match self {
-            Token::Space => TokenType::Space,
-            Token::Newline => TokenType::Newline,
-            Token::Backslash => TokenType::Backslash,
-            Token::Ident(_) => TokenType::Ident,
-            Token::RArrow => TokenType::RArrow,
-            Token::LParen => TokenType::LParen,
-            Token::RParen => TokenType::RParen,
-            Token::Equals => TokenType::Equals,
-            Token::Eof => TokenType::Eof,
+        match self.data {
+            TokenData::Space => TokenType::Space,
+            TokenData::Newline => TokenType::Newline,
+            TokenData::Backslash => TokenType::Backslash,
+            TokenData::Ident(_) => TokenType::Ident,
+            TokenData::RArrow => TokenType::RArrow,
+            TokenData::LParen => TokenType::LParen,
+            TokenData::RParen => TokenType::RParen,
+            TokenData::Equals => TokenType::Equals,
+            TokenData::Eof => TokenType::Eof,
         }
     }
 }
@@ -100,6 +124,21 @@ pub enum Error {
     UnexpectedEof(Offset),
 }
 
+impl Error {
+    pub fn reportable(&self) -> errors::Error {
+        match self {
+            Error::Unexpected(c, offset) => errors::Error {
+                highlight: Highlight::Point(*offset),
+                message: format!("Unexpected symbol '{}'", c),
+            },
+            Error::UnexpectedEof(offset) => errors::Error {
+                highlight: Highlight::Point(*offset),
+                message: String::from("Unexpected end of input"),
+            },
+        }
+    }
+}
+
 pub type LexerResult<T> = Result<T, Error>;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -119,7 +158,11 @@ impl<'src> Lexer<'src> {
         }
     }
 
-    fn next_char(&mut self) -> Option<char> {
+    fn lookahead(&mut self) -> Option<char> {
+        self.position.peek().map(|c| *c)
+    }
+
+    fn consume(&mut self) -> Option<char> {
         self.position.next().map(|c| {
             self.offset.add_mut(c.len_utf8().try_into().unwrap());
             c
@@ -127,14 +170,20 @@ impl<'src> Lexer<'src> {
     }
 
     fn consume_ident_body(&mut self, start_offset: Offset) -> Token<'src> {
-        while let Some(c) = self.position.peek() {
+        while let Some(ref c) = self.lookahead() {
             if !is_ident_body(c) {
                 break;
             }
-            self.next_char();
+            self.consume();
         }
         let end_offset = self.offset;
-        Token::Ident(&self.src_file.data()[start_offset.to_usize()..end_offset.to_usize()])
+        let data =
+            TokenData::Ident(&self.src_file.data()[start_offset.to_usize()..end_offset.to_usize()]);
+        let span = Span {
+            start: start_offset,
+            length: end_offset.subtract(start_offset.to_u32()),
+        };
+        Token { data, span }
     }
 
     fn unexpected(&self, c: char) -> Error {
@@ -145,27 +194,41 @@ impl<'src> Lexer<'src> {
         Error::UnexpectedEof(self.offset)
     }
 
+    fn emit(&mut self, start_offset: Offset, data: TokenData<'src>) -> NextToken<'src> {
+        self.consume();
+        let end_offset = self.offset;
+        let span = Span {
+            start: start_offset,
+            length: end_offset.subtract(start_offset.to_u32()),
+        };
+        NextToken::Token(Token { data, span })
+    }
+
     fn next_token(&mut self) -> NextToken<'src> {
         let start_offset = self.offset;
-        match self.next_char() {
+        match self.lookahead() {
             Option::None => NextToken::Done,
             Option::Some(c) => match c {
-                '\n' => NextToken::Token(Token::Newline),
-                ' ' => NextToken::Token(Token::Space),
-                '\\' => NextToken::Token(Token::Backslash),
+                '\n' => self.emit(start_offset, TokenData::Newline),
+                ' ' => self.emit(start_offset, TokenData::Space),
+                '\\' => self.emit(start_offset, TokenData::Backslash),
                 '-' =>
                 // RArrow
                 {
-                    match self.next_char() {
-                        Option::Some('>') => NextToken::Token(Token::RArrow),
+                    self.consume();
+                    match self.lookahead() {
+                        Option::Some('>') => self.emit(start_offset, TokenData::RArrow),
                         Option::Some(c) => NextToken::Error(self.unexpected(c)),
                         Option::None => NextToken::Error(self.unexpected_eof()),
                     }
                 }
-                '(' => NextToken::Token(Token::LParen),
-                ')' => NextToken::Token(Token::RParen),
-                '=' => NextToken::Token(Token::Equals),
-                _ if is_ident_start(&c) => NextToken::Token(self.consume_ident_body(start_offset)),
+                '(' => self.emit(start_offset, TokenData::LParen),
+                ')' => self.emit(start_offset, TokenData::RParen),
+                '=' => self.emit(start_offset, TokenData::Equals),
+                _ if is_ident_start(&c) => {
+                    self.consume();
+                    NextToken::Token(self.consume_ident_body(start_offset))
+                }
                 _ => NextToken::Error(self.unexpected(c)),
             },
         }
@@ -176,7 +239,14 @@ impl<'src> Lexer<'src> {
         loop {
             match self.next_token() {
                 NextToken::Done => {
-                    tokens.push(Token::Eof);
+                    let offset = self.offset;
+                    tokens.push(Token {
+                        data: TokenData::Eof,
+                        span: Span {
+                            start: offset,
+                            length: Offset(1),
+                        },
+                    });
                     break;
                 }
                 NextToken::Token(token) => {
@@ -205,7 +275,13 @@ fn test_lexer_example1() {
     let src_file = test_source_file(String::from("->"));
     assert_eq!(
         Lexer::from_source_file(&src_file).next_token(),
-        NextToken::Token(Token::RArrow)
+        NextToken::Token(Token {
+            data: TokenData::RArrow,
+            span: Span {
+                start: Offset(0),
+                length: Offset(2)
+            }
+        })
     );
 }
 
@@ -214,7 +290,13 @@ fn test_lexer_example2() {
     let src_file = test_source_file(String::from("hello"));
     assert_eq!(
         Lexer::from_source_file(&src_file).next_token(),
-        NextToken::Token(Token::Ident("hello"))
+        NextToken::Token(Token {
+            data: TokenData::Ident("hello"),
+            span: Span {
+                start: Offset(0),
+                length: Offset(5)
+            }
+        })
     );
 }
 
@@ -224,17 +306,83 @@ fn test_lexer_example3() {
     assert_eq!(
         Lexer::from_source_file(&src_file).tokenize(),
         Result::Ok(vec![
-            Token::Ident("f"),
-            Token::Space,
-            Token::Equals,
-            Token::Space,
-            Token::Backslash,
-            Token::Ident("input"),
-            Token::Space,
-            Token::RArrow,
-            Token::Space,
-            Token::Ident("input"),
-            Token::Eof
+            Token {
+                data: TokenData::Ident("f"),
+                span: Span {
+                    start: Offset(0),
+                    length: Offset(1)
+                }
+            },
+            Token {
+                data: TokenData::Space,
+                span: Span {
+                    start: Offset(1),
+                    length: Offset(1)
+                }
+            },
+            Token {
+                data: TokenData::Equals,
+                span: Span {
+                    start: Offset(2),
+                    length: Offset(1)
+                }
+            },
+            Token {
+                data: TokenData::Space,
+                span: Span {
+                    start: Offset(3),
+                    length: Offset(1)
+                }
+            },
+            Token {
+                data: TokenData::Backslash,
+                span: Span {
+                    start: Offset(4),
+                    length: Offset(1)
+                }
+            },
+            Token {
+                data: TokenData::Ident("input"),
+                span: Span {
+                    start: Offset(5),
+                    length: Offset(5)
+                }
+            },
+            Token {
+                data: TokenData::Space,
+                span: Span {
+                    start: Offset(10),
+                    length: Offset(1)
+                }
+            },
+            Token {
+                data: TokenData::RArrow,
+                span: Span {
+                    start: Offset(11),
+                    length: Offset(2)
+                }
+            },
+            Token {
+                data: TokenData::Space,
+                span: Span {
+                    start: Offset(13),
+                    length: Offset(1)
+                }
+            },
+            Token {
+                data: TokenData::Ident("input"),
+                span: Span {
+                    start: Offset(14),
+                    length: Offset(5)
+                }
+            },
+            Token {
+                data: TokenData::Eof,
+                span: Span {
+                    start: Offset(19),
+                    length: Offset(1)
+                }
+            },
         ])
     );
 }
@@ -244,7 +392,7 @@ fn test_lexer_example4() {
     let src_file = test_source_file(String::from("  aa"));
     assert_eq!(
         Lexer::from_source_file(&src_file).tokenize(),
-        Result::Err(Error::Unexpected('', Offset(5)))
+        Result::Err(Error::Unexpected('', Offset(4)))
     );
 }
 
@@ -254,12 +402,48 @@ fn test_lexer_example5() {
     assert_eq!(
         Lexer::from_source_file(&src_file).tokenize(),
         Result::Ok(vec![
-            Token::Space,
-            Token::Space,
-            Token::Ident("aa"),
-            Token::Newline,
-            Token::Ident("aa"),
-            Token::Eof
+            Token {
+                data: TokenData::Space,
+                span: Span {
+                    start: Offset(0),
+                    length: Offset(1)
+                }
+            },
+            Token {
+                data: TokenData::Space,
+                span: Span {
+                    start: Offset(1),
+                    length: Offset(1)
+                }
+            },
+            Token {
+                data: TokenData::Ident("aa"),
+                span: Span {
+                    start: Offset(2),
+                    length: Offset(2)
+                }
+            },
+            Token {
+                data: TokenData::Newline,
+                span: Span {
+                    start: Offset(4),
+                    length: Offset(1)
+                }
+            },
+            Token {
+                data: TokenData::Ident("aa"),
+                span: Span {
+                    start: Offset(5),
+                    length: Offset(2)
+                }
+            },
+            Token {
+                data: TokenData::Eof,
+                span: Span {
+                    start: Offset(7),
+                    length: Offset(1)
+                }
+            },
         ])
     );
 }
@@ -269,6 +453,6 @@ fn test_lexer_example6() {
     let src_file = test_source_file(String::from("  aa\na"));
     assert_eq!(
         Lexer::from_source_file(&src_file).tokenize(),
-        Result::Err(Error::Unexpected('', Offset(7)))
+        Result::Err(Error::Unexpected('', Offset(6)))
     );
 }
