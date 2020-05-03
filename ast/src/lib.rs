@@ -10,4 +10,8 @@ impl<'src> Expr<'src> {
     pub fn mk_app(f: Self, x: Self) -> Self {
         Expr::App(Box::new(f), Box::new(x))
     }
+
+    pub fn mk_lam(arg: &'src str, x: Self) -> Self {
+        Expr::Lam(arg, Box::new(x))
+    }
 }
