@@ -1,59 +1,11 @@
+pub mod heap;
+pub mod stack;
+pub mod value;
+
+use crate::heap::Heap;
+use crate::stack::Stack;
+use crate::value::Value;
 use ast::de_bruijn::{Expr, ExprRef};
-use std::slice::Iter;
-use typed_arena::Arena;
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Value<'expr, 'value> {
-    Closure {
-        env: Vec<&'value Value<'expr, 'value>>,
-        body: ExprRef<'expr>,
-    },
-}
-
-pub struct Heap<'expr, 'value> {
-    arena: Arena<Value<'expr, 'value>>,
-}
-
-impl<'expr, 'value> Heap<'expr, 'value> {
-    pub fn new() -> Self {
-        Heap {
-            arena: Arena::new(),
-        }
-    }
-
-    pub fn alloc<'heap>(&'heap self, val: Value<'expr, 'value>) -> &'value Value<'expr, 'value>
-    where
-        'heap: 'value,
-    {
-        self.arena.alloc(val)
-    }
-}
-
-pub struct Stack<'expr, 'value> {
-    vec: Vec<&'value Value<'expr, 'value>>,
-}
-
-impl<'expr, 'value> Stack<'expr, 'value> {
-    pub fn new() -> Self {
-        Stack { vec: Vec::new() }
-    }
-
-    pub fn push(&mut self, val: &'value Value<'expr, 'value>) {
-        self.vec.push(val)
-    }
-
-    pub fn pop(&mut self) -> &'value Value<'expr, 'value> {
-        self.vec.pop().unwrap()
-    }
-
-    pub fn peek(&self) -> &'value Value<'expr, 'value> {
-        self.vec.last().unwrap()
-    }
-
-    pub fn iter(&self) -> Iter<&'value Value<'expr, 'value>> {
-        self.vec.iter()
-    }
-}
 
 pub fn eval<'expr, 'heap, 'value>(
     heap: &'heap Heap<'expr, 'value>,
@@ -95,8 +47,8 @@ fn test_eval1() {
         env: Vec::new(),
         body: &Expr::Var(0),
     };
-    let mut heap = Heap::new();
-    let mut stack = Stack::new();
+    let mut heap = Heap::with_capacity(1024);
+    let mut stack = Stack::with_capacity(64);
     assert_eq!(eval(&mut heap, &mut stack, &Vec::new(), input), output)
 }
 
@@ -108,8 +60,8 @@ fn test_eval2() {
         env: Vec::new(),
         body: &Expr::Var(0),
     };
-    let mut heap = Heap::new();
-    let mut stack = Stack::new();
+    let mut heap = Heap::with_capacity(1024);
+    let mut stack = Stack::with_capacity(64);
     assert_eq!(eval(&mut heap, &mut stack, &Vec::new(), input), output)
 }
 
@@ -126,8 +78,8 @@ fn test_eval3() {
         env: vec![id_value],
         body: &Expr::Var(1),
     };
-    let mut heap = Heap::new();
-    let mut stack = Stack::new();
+    let mut heap = Heap::with_capacity(1024);
+    let mut stack = Stack::with_capacity(64);
     assert_eq!(eval(&mut heap, &mut stack, &Vec::new(), input), output)
 }
 
@@ -141,7 +93,7 @@ fn test_eval4() {
         env: Vec::new(),
         body: &Expr::Var(0),
     };
-    let mut heap = Heap::new();
-    let mut stack = Stack::new();
+    let mut heap = Heap::with_capacity(1024);
+    let mut stack = Stack::with_capacity(64);
     assert_eq!(eval(&mut heap, &mut stack, &Vec::new(), input), output)
 }
