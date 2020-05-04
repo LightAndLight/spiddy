@@ -1,3 +1,4 @@
+use ast::ExprBuilder;
 use lexer::Lexer;
 use parser::Parser;
 use span::SourceFiles;
@@ -23,8 +24,9 @@ fn run() -> bool {
         }
     };
 
+    let builder = ExprBuilder::new();
     let ast = {
-        let mut parser = Parser::new(&tokens);
+        let mut parser = Parser::new(&builder, &tokens);
         match parser.parse_expr_eof() {
             Result::Err(err) => {
                 err.reportable().report(&src_files);

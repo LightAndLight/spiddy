@@ -1,4 +1,4 @@
-use ast::Expr;
+use ast::{Expr, ExprBuilder, ExprRef};
 use bit_set::BitSet;
 use errors::Highlight;
 #[cfg(test)]
@@ -48,26 +48,31 @@ pub struct ExpectedSet {
 impl ExpectedSet {
     pub fn new() -> Self {
         ExpectedSet {
-            bits: BitSet::new(),
+            bits: BitSet::with_capacity(1),
         }
     }
 
+    #[inline]
     pub fn clear(&mut self) {
         self.bits.clear();
     }
 
+    #[inline]
     pub fn insert(&mut self, tt: &TokenType) {
         self.bits.insert(tt.to_usize());
     }
 
+    #[inline]
     pub fn union(&mut self, other: &ExpectedSet) {
         self.bits.union_with(&other.bits);
     }
 
+    #[inline]
     pub fn remove(&mut self, tt: &TokenType) {
         self.bits.remove(tt.to_usize());
     }
 
+    #[inline]
     pub fn contains(&self, tt: &TokenType) -> bool {
         self.bits.contains(tt.to_usize())
     }
@@ -114,7 +119,7 @@ macro_rules! expected {
             let mut followed_by = ExpectedSet::new();
             $(
                 followed_by.insert($tt);
-            );*
+            )*
             followed_by
         }
     }
@@ -191,21 +196,26 @@ macro_rules! with_follows_extended {
 
 pub type ParseResult<'src, 'tokens, T> = Result<T, Error<'src, 'tokens>>;
 
-pub struct Parser<'src, 'tokens> {
+pub struct Parser<'src, 'tokens, 'builder, 'expr> {
+    builder: &'builder ExprBuilder<'src, 'expr>,
     position: Peekable<Iter<'tokens, Token<'src>>>,
     expected: ExpectedSet,
     follows: Vec<ExpectedSet>,
     atom_start_set: ExpectedSet,
 }
 
-impl<'src, 'tokens> Parser<'src, 'tokens> {
+impl<'src, 'tokens, 'builder, 'expr> Parser<'src, 'tokens, 'builder, 'expr> {
     /// `input` must be terminated by a `TokenType::Eof`
-    pub fn new(input: &'tokens Vec<Token<'src>>) -> Self {
+    pub fn new(
+        builder: &'builder ExprBuilder<'src, 'expr>,
+        input: &'tokens Vec<Token<'src>>,
+    ) -> Self {
         let expected = ExpectedSet::new();
         let follows = Vec::new();
         let atom_start_set = expected![&TokenType::Ident, &TokenType::LParen];
 
         Parser {
+            builder,
             position: input.iter().peekable(),
             expected,
             follows,
@@ -295,11 +305,14 @@ impl<'src, 'tokens> Parser<'src, 'tokens> {
     ///   ident
     ///   '(' expr ')'
     /// ```
-    fn try_parse_atom(&mut self) -> ParseResult<'src, 'tokens, Option<Expr<'src>>> {
+    fn try_parse_atom(&mut self) -> ParseResult<'src, 'tokens, Option<ExprRef<'src, 'expr>>>
+    where
+        'builder: 'expr,
+    {
         match self.expect_ident() {
             Option::Some(ident) => {
                 self.ignore_spaces();
-                Result::Ok(Option::Some(Expr::Ident(ident)))
+                Result::Ok(Option::Some(self.builder.mk_ident(ident)))
             }
             Option::None => match self.expect(&TokenType::LParen) {
                 Option::Some(_) => {
@@ -312,7 +325,7 @@ impl<'src, 'tokens> Parser<'src, 'tokens> {
                     let _ = self.require(&TokenType::RParen)?;
                     let _ = self.ignore_spaces();
 
-                    Result::Ok(Option::Some(Expr::Parens(Box::new(inner))))
+                    Result::Ok(Option::Some(self.builder.mk_parens(inner)))
                 }
                 Option::None => Result::Ok(Option::None),
             },
@@ -323,7 +336,10 @@ impl<'src, 'tokens> Parser<'src, 'tokens> {
     /// lambda ::=
     ///   '\' ident '->' expr
     /// ```
-    fn try_parse_lam(&mut self) -> ParseResult<'src, 'tokens, Option<Expr<'src>>> {
+    fn try_parse_lam(&mut self) -> ParseResult<'src, 'tokens, Option<ExprRef<'src, 'expr>>>
+    where
+        'builder: 'expr,
+    {
         match self.expect(&TokenType::Backslash) {
             Option::Some(_) => {
                 let _ = self.ignore_spaces();
@@ -336,7 +352,7 @@ impl<'src, 'tokens> Parser<'src, 'tokens> {
 
                 let body = self.parse_expr()?;
 
-                Result::Ok(Option::Some(Expr::Lam(arg, Box::new(body))))
+                Result::Ok(Option::Some(self.builder.mk_lam(arg, body)))
             }
             Option::None => Result::Ok(Option::None),
         }
@@ -346,7 +362,10 @@ impl<'src, 'tokens> Parser<'src, 'tokens> {
     /// app ::=
     ///   atom atom*
     /// ```
-    fn try_parse_app(&mut self) -> ParseResult<'src, 'tokens, Option<Expr<'src>>> {
+    fn try_parse_app(&mut self) -> ParseResult<'src, 'tokens, Option<ExprRef<'src, 'expr>>>
+    where
+        'builder: 'expr,
+    {
         let atom_res =
             with_follows_extended!(self, self.atom_start_set.clone(), |this: &mut Self| this
                 .try_parse_atom())?;
@@ -373,7 +392,7 @@ impl<'src, 'tokens> Parser<'src, 'tokens> {
                             return self.unexpected_with(&followed_by);
                         }
                         Result::Ok(Option::Some(expr)) => {
-                            result = Expr::mk_app(result, expr);
+                            result = self.builder.mk_app(result, expr);
                         }
                     }
                 }
@@ -388,7 +407,10 @@ impl<'src, 'tokens> Parser<'src, 'tokens> {
     ///   lambda
     ///   app
     /// ```
-    fn parse_expr(&mut self) -> ParseResult<'src, 'tokens, Expr<'src>> {
+    fn parse_expr(&mut self) -> ParseResult<'src, 'tokens, ExprRef<'src, 'expr>>
+    where
+        'builder: 'expr,
+    {
         let lam_result = self.try_parse_lam()?;
         match lam_result {
             Option::Some(expr) => Result::Ok(expr),
@@ -402,7 +424,10 @@ impl<'src, 'tokens> Parser<'src, 'tokens> {
         }
     }
 
-    pub fn parse_expr_eof(&mut self) -> ParseResult<'src, 'tokens, Expr<'src>> {
+    pub fn parse_expr_eof(&mut self) -> ParseResult<'src, 'tokens, ExprRef<'src, 'expr>>
+    where
+        'builder: 'expr,
+    {
         let mut followed_by = ExpectedSet::new();
         followed_by.insert(&TokenType::Eof);
         self.follows.push(followed_by);
@@ -413,7 +438,7 @@ impl<'src, 'tokens> Parser<'src, 'tokens> {
 }
 
 #[cfg(test)]
-fn test_parser<'src>(input: String, expected: Expr<'src>) {
+fn test_parser<'src, 'expr>(input: String, expected: ExprRef<'src, 'expr>) {
     let source_file = SourceFile {
         name: String::from("test"),
         start: Offset(0),
@@ -422,7 +447,11 @@ fn test_parser<'src>(input: String, expected: Expr<'src>) {
     let lexer_res = Lexer::from_source_file(&source_file).tokenize();
     match lexer_res {
         Result::Ok(ref tokens) => {
-            assert_eq!(Parser::new(tokens).parse_expr_eof(), Result::Ok(expected))
+            let builder = ExprBuilder::new();
+            assert_eq!(
+                Parser::new(&builder, tokens).parse_expr_eof(),
+                Result::Ok(expected)
+            )
         }
         Result::Err(err) => panic!(format!("{:?}", err)),
     }
@@ -438,7 +467,11 @@ fn test_parser_fail<'src, 'tokens>(input: String, expected: Error<'src, 'tokens>
     let lexer_res = Lexer::from_source_file(&source_file).tokenize();
     match lexer_res {
         Result::Ok(ref tokens) => {
-            assert_eq!(Parser::new(tokens).parse_expr_eof(), Result::Err(expected))
+            let builder = ExprBuilder::new();
+            assert_eq!(
+                Parser::new(&builder, tokens).parse_expr_eof(),
+                Result::Err(expected)
+            )
         }
         Result::Err(err) => panic!(format!("{:?}", err)),
     }
@@ -447,35 +480,35 @@ fn test_parser_fail<'src, 'tokens>(input: String, expected: Error<'src, 'tokens>
 #[test]
 fn test_parser_ident() {
     let input = String::from("hello");
-    test_parser(input, Expr::Ident("hello"))
+    test_parser(input, &Expr::Ident("hello"))
 }
 
 #[test]
 fn test_parser_lambda() {
     let input = String::from("\\x -> x");
-    test_parser(input, Expr::Lam("x", Box::new(Expr::Ident("x"))))
+    test_parser(input, &Expr::Lam("x", &Expr::Ident("x")))
 }
 
 #[test]
 fn test_parser_app_2() {
     let input = String::from("x x");
-    test_parser(
-        input,
-        Expr::App(Box::new(Expr::Ident("x")), Box::new(Expr::Ident("x"))),
-    )
+    test_parser(input, &Expr::App(&Expr::Ident("x"), &Expr::Ident("x")))
 }
 
 #[test]
 fn test_parser_app_4() {
     let input = String::from("what is love baby");
-    let head = Expr::Ident("what");
-    let tail = vec!["is", "love", "baby"];
-    test_parser(
-        input,
-        tail.into_iter().fold(head, |acc, x| {
-            Expr::App(Box::new(acc), Box::new(Expr::Ident(x)))
-        }),
-    )
+
+    let builder = ExprBuilder::new();
+    let expected = builder.mk_apps(
+        builder.mk_ident("what"),
+        vec![
+            builder.mk_ident("is"),
+            builder.mk_ident("love"),
+            builder.mk_ident("baby"),
+        ],
+    );
+    test_parser(input, expected)
 }
 
 #[test]
@@ -553,5 +586,5 @@ fn test_parser_app_fail4() {
 #[test]
 fn test_parser_parens() {
     let input = String::from("(x)");
-    test_parser(input, Expr::Parens(Box::new(Expr::Ident("x"))))
+    test_parser(input, &Expr::Parens(&Expr::Ident("x")))
 }
