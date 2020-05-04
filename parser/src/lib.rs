@@ -8,7 +8,6 @@ use span::Offset;
 #[cfg(test)]
 use span::{SourceFile, Span};
 use std::fmt::{Debug, Display};
-use std::iter::Peekable;
 use std::slice::Iter;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -185,11 +184,14 @@ macro_rules! with_follows {
 #[macro_export]
 macro_rules! with_follows_extended {
     ( $self:ident, $followed_by:expr, $cont:block ) => {{
-        let mut last_follows = $self
-            .follows
-            .last()
-            .map_or_else(|| ExpectedSet::new(), |set| set.clone());
-        last_follows.union(&$followed_by);
+        let last_follows = match $self.follows.last() {
+            Option::None => $followed_by.clone(),
+            Option::Some(last_follows) => {
+                let mut last_follows = last_follows.clone();
+                last_follows.union($followed_by);
+                last_follows
+            }
+        };
         with_follows!($self, last_follows, $cont)
     }};
 }
@@ -198,7 +200,8 @@ pub type ParseResult<'src, 'tokens, T> = Result<T, Error<'src, 'tokens>>;
 
 pub struct Parser<'src, 'tokens, 'builder, 'expr> {
     builder: &'builder ExprBuilder<'src, 'expr>,
-    position: Peekable<Iter<'tokens, Token<'src>>>,
+    current: Option<&'tokens Token<'src>>,
+    position: Iter<'tokens, Token<'src>>,
     expected: ExpectedSet,
     follows: Vec<ExpectedSet>,
     atom_start_set: ExpectedSet,
@@ -213,10 +216,13 @@ impl<'src, 'tokens, 'builder, 'expr> Parser<'src, 'tokens, 'builder, 'expr> {
         let expected = ExpectedSet::new();
         let follows = Vec::new();
         let atom_start_set = expected![&TokenType::Ident, &TokenType::LParen];
+        let mut position = input.iter();
+        let current = position.next();
 
         Parser {
             builder,
-            position: input.iter().peekable(),
+            current,
+            position,
             expected,
             follows,
             atom_start_set,
@@ -224,8 +230,8 @@ impl<'src, 'tokens, 'builder, 'expr> Parser<'src, 'tokens, 'builder, 'expr> {
     }
 
     #[inline]
-    fn current_token(&mut self) -> &'tokens Token<'src> {
-        match self.position.peek() {
+    fn current_token(&self) -> &'tokens Token<'src> {
+        match self.current {
             Option::Some(token) => token,
             Option::None => panic!("current_token failed: ran out of input"),
         }
@@ -233,7 +239,9 @@ impl<'src, 'tokens, 'builder, 'expr> Parser<'src, 'tokens, 'builder, 'expr> {
 
     #[inline]
     fn consume(&mut self) -> Option<&'tokens Token<'src>> {
-        self.position.next()
+        let res = self.position.next();
+        self.current = res;
+        res
     }
 
     fn expect(&mut self, tt: &'tokens TokenType) -> Option<&'tokens Token<'src>> {
@@ -252,13 +260,11 @@ impl<'src, 'tokens, 'builder, 'expr> Parser<'src, 'tokens, 'builder, 'expr> {
         }
     }
 
-    fn unexpected_with<T>(&mut self, extra: &ExpectedSet) -> ParseResult<'src, 'tokens, T> {
+    fn unexpected_with<T>(&self, extra: &ExpectedSet) -> ParseResult<'src, 'tokens, T> {
         let actual = self.current_token();
-        self.expected.union(extra);
-        Result::Err(Error::Unexpected {
-            actual,
-            expected: self.expected.clone(),
-        })
+        let mut expected = self.expected.clone();
+        expected.union(extra);
+        Result::Err(Error::Unexpected { actual, expected })
     }
 
     #[inline]
@@ -366,26 +372,41 @@ impl<'src, 'tokens, 'builder, 'expr> Parser<'src, 'tokens, 'builder, 'expr> {
         'builder: 'expr,
     {
         let atom_res =
-            with_follows_extended!(self, self.atom_start_set.clone(), { self.try_parse_atom() })?;
+            with_follows_extended!(self, &self.atom_start_set, { self.try_parse_atom() })?;
         match atom_res {
             Option::Some(head) => {
                 let mut result = head;
                 loop {
-                    let atom_res = with_follows_extended!(self, self.atom_start_set.clone(), {
+                    let atom_res = with_follows_extended!(self, &self.atom_start_set, {
                         self.try_parse_atom()
                     });
                     match atom_res {
                         Result::Err(err) => return Result::Err(err),
                         Result::Ok(Option::None) => {
                             let token = self.current_token();
+                            match self.follows.last() {
+                                Option::None => {
+                                    return self.unexpected_with(&ExpectedSet::new());
+                                }
+                                Option::Some(followed_by) => {
+                                    if followed_by.contains(&token.token_type()) {
+                                        break;
+                                    } else {
+                                        return self.unexpected_with(&followed_by);
+                                    }
+                                }
+                            }
+                            /*
                             let followed_by = self
                                 .follows
                                 .last()
                                 .map_or(ExpectedSet::new(), |followed_by| followed_by.clone());
                             if followed_by.contains(&token.token_type()) {
                                 break;
+                            } else {
+                                return self.unexpected_with(&followed_by);
                             }
-                            return self.unexpected_with(&followed_by);
+                            */
                         }
                         Result::Ok(Option::Some(expr)) => {
                             result = self.builder.mk_app(result, expr);
