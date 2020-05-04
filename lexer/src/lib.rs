@@ -2,7 +2,6 @@ use errors::Highlight;
 use span::{Offset, SourceFile, Span};
 use std::convert::TryInto;
 use std::fmt::Display;
-use std::iter::Peekable;
 use std::str::Chars;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -103,7 +102,8 @@ impl<'src> Token<'src> {
 
 pub struct Lexer<'src> {
     src_file: &'src SourceFile,
-    position: Peekable<Chars<'src>>,
+    current: Option<char>,
+    position: Chars<'src>,
     /// offset in bytes; *not* characters (we assume UTF-8 encoding)
     offset: Offset,
 }
@@ -150,23 +150,26 @@ pub enum NextToken<'src> {
 
 impl<'src> Lexer<'src> {
     pub fn from_source_file(src_file: &'src SourceFile) -> Self {
-        let position = src_file.data().chars().peekable();
+        let mut position = src_file.data().chars();
+        let current = position.next();
         Lexer {
             src_file,
+            current,
             position,
             offset: src_file.get_start(),
         }
     }
 
+    #[inline]
     fn lookahead(&mut self) -> Option<char> {
-        self.position.peek().map(|c| *c)
+        self.current
     }
 
-    fn consume(&mut self) -> Option<char> {
-        self.position.next().map(|c| {
-            self.offset.add_mut(c.len_utf8().try_into().unwrap());
-            c
-        })
+    fn consume(&mut self) {
+        let m_c = self.current;
+        self.offset
+            .add_mut(m_c.map_or(0, |c| c.len_utf8().try_into().unwrap()));
+        self.current = self.position.next();
     }
 
     fn consume_ident_body(&mut self, start_offset: Offset) -> Token<'src> {
