@@ -37,6 +37,14 @@ where
             env.extend(stack.iter());
             heap.alloc(Value::Closure { env, body })
         }
+        Expr::U64(n) => heap.alloc(Value::U64(*n)),
+        Expr::AddU64(l, r) => match eval(heap, stack, ctx, l) {
+            Value::U64(l_n) => match eval(heap, stack, ctx, r) {
+                Value::U64(r_n) => heap.alloc(Value::U64(l_n + r_n)),
+                r_value => panic!("eval failed: expected U64, got {:?}", r_value),
+            },
+            l_value => panic!("eval failed: expected U64, got {:?}", l_value),
+        },
     }
 }
 
@@ -93,6 +101,17 @@ fn test_eval4() {
         env: Vec::new(),
         body: &Expr::Var(0),
     };
+    let mut heap = Heap::with_capacity(1024);
+    let mut stack = Stack::with_capacity(64);
+    assert_eq!(eval(&mut heap, &mut stack, &Vec::new(), input), output)
+}
+
+#[test]
+fn test_eval5() {
+    let plus = &Expr::Lam(&Expr::Lam(&Expr::AddU64(&Expr::Var(0), &Expr::Var(1))));
+    let plus_9 = &Expr::App(plus, &Expr::U64(9));
+    let input = &Expr::App(plus_9, &Expr::U64(7));
+    let output = &Value::U64(16);
     let mut heap = Heap::with_capacity(1024);
     let mut stack = Stack::with_capacity(64);
     assert_eq!(eval(&mut heap, &mut stack, &Vec::new(), input), output)

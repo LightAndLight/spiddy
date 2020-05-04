@@ -2,6 +2,15 @@ use crate::syntax;
 use std::collections::HashMap;
 use typed_arena::Arena;
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum Expr<'expr> {
+    Var(usize),
+    Lam(ExprRef<'expr>),
+    App(ExprRef<'expr>, ExprRef<'expr>),
+    U64(u64),
+    AddU64(ExprRef<'expr>, ExprRef<'expr>),
+}
+
 fn __from_ast<'src, 'ast, 'builder, 'expr>(
     var_map: &mut HashMap<&'src str, Vec<usize>>,
     builder: &'builder ExprBuilder<'expr>,
@@ -60,13 +69,6 @@ where
 }
 
 pub type ExprRef<'expr> = &'expr Expr<'expr>;
-
-#[derive(Debug, PartialEq, Eq)]
-pub enum Expr<'expr> {
-    Var(usize),
-    Lam(ExprRef<'expr>),
-    App(ExprRef<'expr>, ExprRef<'expr>),
-}
 
 pub struct ExprBuilder<'expr> {
     arena: Arena<Expr<'expr>>,
