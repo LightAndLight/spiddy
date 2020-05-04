@@ -108,14 +108,12 @@ pub struct Lexer<'src> {
     offset: Offset,
 }
 
-#[inline]
-fn is_ident_start(c: &char) -> bool {
-    c.is_ascii_lowercase()
+fn is_ident_start(c: char) -> bool {
+    ('a' <= c && c <= 'z') || (c == '_')
 }
 
-#[inline]
-fn is_ident_body(c: &char) -> bool {
-    c.is_ascii_alphanumeric()
+fn is_ident_body(c: char) -> bool {
+    ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z') || ('0' <= c && c <= '9') || (c == '_')
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -166,14 +164,14 @@ impl<'src> Lexer<'src> {
     }
 
     fn consume(&mut self) {
-        let m_c = self.current;
-        self.offset
-            .add_mut(m_c.map_or(0, |c| c.len_utf8().try_into().unwrap()));
+        if let Some(c) = self.current {
+            self.offset.add_mut(c.len_utf8().try_into().unwrap());
+        }
         self.current = self.position.next();
     }
 
     fn consume_ident_body(&mut self, start_offset: Offset) -> Token<'src> {
-        while let Some(ref c) = self.lookahead() {
+        while let Some(c) = self.lookahead() {
             if !is_ident_body(c) {
                 break;
             }
@@ -228,7 +226,7 @@ impl<'src> Lexer<'src> {
                 '(' => self.emit(start_offset, TokenData::LParen),
                 ')' => self.emit(start_offset, TokenData::RParen),
                 '=' => self.emit(start_offset, TokenData::Equals),
-                _ if is_ident_start(&c) => {
+                _ if is_ident_start(c) => {
                     self.consume();
                     NextToken::Token(self.consume_ident_body(start_offset))
                 }
@@ -238,7 +236,7 @@ impl<'src> Lexer<'src> {
     }
 
     pub fn tokenize(mut self) -> LexerResult<Vec<Token<'src>>> {
-        let mut tokens = Vec::new();
+        let mut tokens = Vec::with_capacity(2048);
         loop {
             match self.next_token() {
                 NextToken::Done => {
