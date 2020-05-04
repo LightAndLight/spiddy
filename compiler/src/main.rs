@@ -36,7 +36,7 @@ fn run() -> bool {
         }
     };
 
-    // println!("{:?}", ast);
+    println!("{:?}", ast);
 
     true
 }

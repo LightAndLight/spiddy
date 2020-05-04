@@ -1,6 +1,9 @@
-use ast::{Expr, ExprBuilder, ExprRef};
+#[cfg(test)]
+use ast::Expr;
+use ast::{ExprBuilder, ExprRef};
 use bit_set::BitSet;
 use errors::Highlight;
+use lazy_static::lazy_static;
 #[cfg(test)]
 use lexer::Lexer;
 use lexer::{Token, TokenData, TokenType};
@@ -204,7 +207,11 @@ pub struct Parser<'src, 'tokens, 'builder, 'expr> {
     position: Iter<'tokens, Token<'src>>,
     expected: ExpectedSet,
     follows: Vec<ExpectedSet>,
-    atom_start_set: ExpectedSet,
+}
+
+lazy_static! {
+    static ref EXPECTED_RPAREN: ExpectedSet = expected![&TokenType::RParen];
+    static ref ATOM_START_SET: ExpectedSet = expected![&TokenType::Ident, &TokenType::LParen];
 }
 
 impl<'src, 'tokens, 'builder, 'expr> Parser<'src, 'tokens, 'builder, 'expr> {
@@ -215,7 +222,6 @@ impl<'src, 'tokens, 'builder, 'expr> Parser<'src, 'tokens, 'builder, 'expr> {
     ) -> Self {
         let expected = ExpectedSet::new();
         let follows = Vec::new();
-        let atom_start_set = expected![&TokenType::Ident, &TokenType::LParen];
         let mut position = input.iter();
         let current = position.next();
 
@@ -225,7 +231,6 @@ impl<'src, 'tokens, 'builder, 'expr> Parser<'src, 'tokens, 'builder, 'expr> {
             position,
             expected,
             follows,
-            atom_start_set,
         }
     }
 
@@ -325,7 +330,7 @@ impl<'src, 'tokens, 'builder, 'expr> Parser<'src, 'tokens, 'builder, 'expr> {
                     self.ignore_spaces();
 
                     let inner =
-                        with_follows!(self, expected![&TokenType::RParen], { self.parse_expr() })?;
+                        with_follows!(self, (*EXPECTED_RPAREN).clone(), { self.parse_expr() })?;
 
                     let _ = self.require(&TokenType::RParen)?;
                     let _ = self.ignore_spaces();
@@ -371,15 +376,13 @@ impl<'src, 'tokens, 'builder, 'expr> Parser<'src, 'tokens, 'builder, 'expr> {
     where
         'builder: 'expr,
     {
-        let atom_res =
-            with_follows_extended!(self, &self.atom_start_set, { self.try_parse_atom() })?;
+        let atom_res = with_follows_extended!(self, &*ATOM_START_SET, { self.try_parse_atom() })?;
         match atom_res {
             Option::Some(head) => {
                 let mut result = head;
                 loop {
-                    let atom_res = with_follows_extended!(self, &self.atom_start_set, {
-                        self.try_parse_atom()
-                    });
+                    let atom_res =
+                        with_follows_extended!(self, &*ATOM_START_SET, { self.try_parse_atom() });
                     match atom_res {
                         Result::Err(err) => return Result::Err(err),
                         Result::Ok(Option::None) => {
@@ -396,17 +399,6 @@ impl<'src, 'tokens, 'builder, 'expr> Parser<'src, 'tokens, 'builder, 'expr> {
                                     }
                                 }
                             }
-                            /*
-                            let followed_by = self
-                                .follows
-                                .last()
-                                .map_or(ExpectedSet::new(), |followed_by| followed_by.clone());
-                            if followed_by.contains(&token.token_type()) {
-                                break;
-                            } else {
-                                return self.unexpected_with(&followed_by);
-                            }
-                            */
                         }
                         Result::Ok(Option::Some(expr)) => {
                             result = self.builder.mk_app(result, expr);
@@ -445,12 +437,7 @@ impl<'src, 'tokens, 'builder, 'expr> Parser<'src, 'tokens, 'builder, 'expr> {
     where
         'builder: 'expr,
     {
-        let mut followed_by = ExpectedSet::new();
-        followed_by.insert(&TokenType::Eof);
-        self.follows.push(followed_by);
-        let res = self.parse_expr();
-        self.follows.pop();
-        res
+        with_follows!(self, expected![&TokenType::Eof], { self.parse_expr() })
     }
 }
 

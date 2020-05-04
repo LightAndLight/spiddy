@@ -6,6 +6,7 @@ edition = "2018"
 
 [dependencies]
 bit-set = "0.5.1"
+lazy_static = "1.4.0"
 ast = { path = "../ast" }
 errors = { path = "../errors" }
 lexer = { path = "../lexer" }

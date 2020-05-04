@@ -12,7 +12,7 @@ fn run() -> bool {
 
     let src_file = src_files.get_by_name(&file_name);
 
-    for _ in 0..650000 {
+    for _ in 0..950000 {
         let tokens = {
             let lexer = Lexer::from_source_file(src_file);
             match lexer.tokenize() {
