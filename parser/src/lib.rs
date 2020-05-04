@@ -141,7 +141,7 @@ macro_rules! expected {
 ///
 ///    ```ignore
 ///    fn a(&mut self) {
-///        self.with_follows(C_START_SET, |this| this.b())
+///        with_follows!(self, C_START_SET, self.b())
 ///        self.c() // follows inherited from parent
 ///    }
 ///    ```
@@ -150,7 +150,7 @@ macro_rules! expected {
 ///
 ///    ```ignore
 ///    fn a(&mut self) {
-///        self.with_follows_extended(C_START_SET, |this| this.b())
+///        with_follows_extended!(self, C_START_SET, self.b())
 ///        self.c() // follows inherited from parent
 ///    }
 ///    ```
@@ -165,7 +165,7 @@ macro_rules! expected {
 ///
 ///    ```ignore
 ///    fn a(&mut self) {
-///        self.with_follows({'++', '--'}, |this| this.b())
+///        with_follows!(self, {'++', '--'}, self.b())
 ///    }
 ///    ```
 ///
@@ -173,9 +173,9 @@ macro_rules! expected {
 /// The call stack would be duplicating the work of the `follows` stack.
 #[macro_export]
 macro_rules! with_follows {
-    ($self:ident, $followed_by:expr, $cont:expr) => {{
+    ($self:ident, $followed_by:expr, $cont:block) => {{
         $self.follows.push($followed_by);
-        let res = $cont($self);
+        let res = $cont;
         $self.follows.pop();
         res
     }};
@@ -184,7 +184,7 @@ macro_rules! with_follows {
 /// Like `with_follows`, but uses the most recent follow set as a base. See `with_follows` for usage.
 #[macro_export]
 macro_rules! with_follows_extended {
-    ( $self:ident, $followed_by:expr, $cont:expr ) => {{
+    ( $self:ident, $followed_by:expr, $cont:block ) => {{
         let mut last_follows = $self
             .follows
             .last()
@@ -319,8 +319,7 @@ impl<'src, 'tokens, 'builder, 'expr> Parser<'src, 'tokens, 'builder, 'expr> {
                     self.ignore_spaces();
 
                     let inner =
-                        with_follows!(self, expected![&TokenType::RParen], |this: &mut Self| this
-                            .parse_expr())?;
+                        with_follows!(self, expected![&TokenType::RParen], { self.parse_expr() })?;
 
                     let _ = self.require(&TokenType::RParen)?;
                     let _ = self.ignore_spaces();
@@ -367,17 +366,14 @@ impl<'src, 'tokens, 'builder, 'expr> Parser<'src, 'tokens, 'builder, 'expr> {
         'builder: 'expr,
     {
         let atom_res =
-            with_follows_extended!(self, self.atom_start_set.clone(), |this: &mut Self| this
-                .try_parse_atom())?;
+            with_follows_extended!(self, self.atom_start_set.clone(), { self.try_parse_atom() })?;
         match atom_res {
             Option::Some(head) => {
                 let mut result = head;
                 loop {
-                    let atom_res = with_follows_extended!(
-                        self,
-                        self.atom_start_set.clone(),
-                        |this: &mut Self| this.try_parse_atom()
-                    );
+                    let atom_res = with_follows_extended!(self, self.atom_start_set.clone(), {
+                        self.try_parse_atom()
+                    });
                     match atom_res {
                         Result::Err(err) => return Result::Err(err),
                         Result::Ok(Option::None) => {
