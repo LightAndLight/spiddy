@@ -8,42 +8,47 @@ use ast::de_bruijn::{Expr, ExprRef};
 
 pub fn eval<'expr, 'heap, 'value>(
     heap: &'heap Heap<'expr, 'value>,
-    ctx: &Vec<&'value Value<'expr, 'value>>,
+    env: &Vec<&'value Value<'expr, 'value>>,
     expr: ExprRef<'expr>,
 ) -> &'value Value<'expr, 'value>
 where
     'heap: 'value,
 {
     let res = match expr {
-        Expr::Var(n) => ctx[ctx.len() - n - 1],
+        Expr::Var(n) => env[env.len() - n - 1],
         Expr::App(l, r) => {
-            let l_value = eval(heap, ctx, l);
+            let l_value = eval(heap, env, l);
             match l_value {
-                Value::Closure { env, body } => match body {
-                    Expr::Lam(body) => {
-                        let r_value = eval(heap, ctx, r);
-                        let mut ctx = env.clone();
-                        ctx.push(r_value);
-                        let res = eval(heap, &ctx, body);
-                        res
-                    }
-                    _ => panic!("eval failed: expected Lam, got {:?}", body),
-                },
+                Value::Closure { env: next, body } => {
+                    let r_value = eval(heap, env, r);
+
+                    let mut env = next.clone();
+                    env.push(r_value);
+                    let res = eval(heap, &env, body);
+                    res
+                }
                 _ => panic!("eval failed: expected Closure, got {:?}", l_value),
             }
         }
-        Expr::Lam(_) => heap.alloc(Value::Closure {
-            env: ctx.clone(),
-            body: expr,
+        Expr::Lam(body) => heap.alloc(Value::Closure {
+            env: env.clone(),
+            body: body,
         }),
         Expr::U64(n) => heap.alloc(Value::U64(*n)),
-        Expr::AddU64(l, r) => match eval(heap, ctx, l) {
-            Value::U64(l_n) => match eval(heap, ctx, r) {
-                Value::U64(r_n) => heap.alloc(Value::U64(l_n + r_n)),
-                r_value => panic!("eval failed: expected U64, got {:?}", r_value),
-            },
-            l_value => panic!("eval failed: expected U64, got {:?}", l_value),
-        },
+        Expr::AddU64(l, r) => {
+            let lvalue = eval(heap, env, l);
+            match lvalue {
+                Value::U64(l_n) => {
+                    let rvalue = eval(heap, env, r);
+
+                    match rvalue {
+                        Value::U64(r_n) => heap.alloc(Value::U64(l_n + r_n)),
+                        r_value => panic!("eval failed: expected U64, got {:?}", r_value),
+                    }
+                }
+                l_value => panic!("eval failed: expected U64, got {:?}", l_value),
+            }
+        }
     };
     res
 }
@@ -53,7 +58,7 @@ fn test_eval1() {
     let input = &Expr::Lam(&Expr::Var(0));
     let output = &Value::Closure {
         env: Vec::new(),
-        body: &Expr::Lam(&Expr::Var(0)),
+        body: &Expr::Var(0),
     };
     let mut heap = Heap::with_capacity(1024);
     assert_eq!(eval(&mut heap, &Vec::new(), input), output)
@@ -65,7 +70,7 @@ fn test_eval2() {
     let input = &Expr::App(id, id);
     let output = &Value::Closure {
         env: Vec::new(),
-        body: &Expr::Lam(&Expr::Var(0)),
+        body: &Expr::Var(0),
     };
     let mut heap = Heap::with_capacity(1024);
     assert_eq!(eval(&mut heap, &Vec::new(), input), output)
@@ -76,13 +81,13 @@ fn test_eval3() {
     let id = &Expr::Lam(&Expr::Var(0));
     let id_value = &Value::Closure {
         env: Vec::new(),
-        body: &Expr::Lam(&Expr::Var(0)),
+        body: &Expr::Var(0),
     };
     let konst = &Expr::Lam(&Expr::Lam(&Expr::Var(1)));
     let input = &Expr::App(konst, id);
     let output = &Value::Closure {
         env: vec![id_value],
-        body: &Expr::Lam(&Expr::Var(1)),
+        body: &Expr::Var(1),
     };
     let mut heap = Heap::with_capacity(1024);
     assert_eq!(eval(&mut heap, &Vec::new(), input), output)
@@ -96,7 +101,7 @@ fn test_eval4() {
     let input = &Expr::App(konst_id, konst);
     let output = &Value::Closure {
         env: Vec::new(),
-        body: &Expr::Lam(&Expr::Var(0)),
+        body: &Expr::Var(0),
     };
     let mut heap = Heap::with_capacity(1024);
     assert_eq!(eval(&mut heap, &Vec::new(), input), output)
