@@ -1,8 +1,8 @@
 use ast::de_bruijn;
 use ast::syntax;
+use eval::eval_loop;
 use eval::heap::Heap;
 use eval::stack::Stack;
-use eval::{eval, eval_loop};
 use lexer::Lexer;
 use parser::Parser;
 use span::SourceFiles;
@@ -89,6 +89,7 @@ where
 fn run() -> bool {
     let args: Vec<String> = std::env::args().into_iter().collect();
     match args[1].as_str() {
+        /*
         "eval" => {
             let builder = de_bruijn::ExprBuilder::new();
             let expr = build_eval_expr(&builder);
@@ -97,6 +98,7 @@ fn run() -> bool {
                 let _ = eval(&heap, &Vec::new(), expr);
             }
         }
+        */
         "eval_loop" => {
             let builder = de_bruijn::ExprBuilder::new();
             let expr = build_eval_expr(&builder);
