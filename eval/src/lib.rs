@@ -135,8 +135,10 @@ where
                         _ => panic!("eval_loop failed: Expected closure, got {:?}", value),
                     },
                     AppR(next_env, body, Hole) => {
-                        env = next_env.clone();
-                        env.push(value);
+                        let mut next_env = next_env;
+                        next_env.push(value);
+
+                        env = next_env;
                         code = Input(body);
                     }
                     AddU64L(r_env, Hole, r) => match value {
