@@ -1,6 +1,6 @@
 #[cfg(test)]
-use ast::Expr;
-use ast::{ExprBuilder, ExprRef};
+use ast::syntax::Expr;
+use ast::syntax::{ExprBuilder, ExprRef};
 use bit_set::BitSet;
 use errors::Highlight;
 use lazy_static::lazy_static;

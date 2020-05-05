@@ -8,6 +8,8 @@ edition = "2018"
 
 [dependencies]
 ast = { path = "../ast" }
+eval = { path = "../eval" }
 lexer = { path = "../lexer" }
 parser = { path = "../parser" }
+pretty = { path = "../pretty" }
 span = { path = "../span" }

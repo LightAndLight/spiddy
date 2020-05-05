@@ -1,16 +1,17 @@
-use ast::Expr;
+use ast::de_bruijn;
+use ast::syntax;
 
-pub fn pretty_expr(expr: Expr) -> String {
+pub fn pretty_syntax<'src, 'expr>(expr: syntax::ExprRef<'src, 'expr>) -> String {
     match expr {
-        Expr::Ident(ident) => String::from(ident),
-        Expr::App(l, r) => {
+        syntax::Expr::Ident(ident) => String::from(*ident),
+        syntax::Expr::App(l, r) => {
             let parens_l = match &*l {
-                Expr::Lam(_, _) => true,
+                syntax::Expr::Lam(_, _) => true,
                 _ => false,
             };
             let parens_r = match &*r {
-                Expr::Lam(_, _) => true,
-                Expr::App(_, _) => true,
+                syntax::Expr::Lam(_, _) => true,
+                syntax::Expr::App(_, _) => true,
                 _ => false,
             };
             let mut string = String::new();
@@ -18,7 +19,7 @@ pub fn pretty_expr(expr: Expr) -> String {
             if parens_l {
                 string.push('(');
             }
-            string += &pretty_expr(*l);
+            string += &pretty_syntax(*l);
             if parens_l {
                 string.push(')');
             }
@@ -28,23 +29,100 @@ pub fn pretty_expr(expr: Expr) -> String {
             if parens_r {
                 string.push('(');
             }
-            string += &pretty_expr(*r);
+            string += &pretty_syntax(*r);
             if parens_r {
                 string.push(')');
             }
 
             string
         }
-        Expr::Lam(arg, body) => {
+        syntax::Expr::Lam(arg, body) => {
             let mut string = String::from("\\");
             string += arg;
             string += " -> ";
-            string += &pretty_expr(*body);
+            string += &pretty_syntax(*body);
             string
         }
-        Expr::Parens(inner) => {
+        syntax::Expr::Parens(inner) => {
             let mut string = String::from("(");
-            string += &pretty_expr(*inner);
+            string += &pretty_syntax(*inner);
+            string
+        }
+    }
+}
+
+pub fn pretty_de_bruijn<'expr>(expr: de_bruijn::ExprRef<'expr>) -> String {
+    match expr {
+        de_bruijn::Expr::Var(ix) => format!("#{}", ix),
+        de_bruijn::Expr::U64(n) => format!("{}", n),
+        de_bruijn::Expr::App(l, r) => {
+            let parens_l = match &*l {
+                de_bruijn::Expr::Lam(_) => true,
+                _ => false,
+            };
+            let parens_r = match &*r {
+                de_bruijn::Expr::Lam(_) => true,
+                de_bruijn::Expr::App(_, _) => true,
+                _ => false,
+            };
+            let mut string = String::new();
+
+            if parens_l {
+                string.push('(');
+            }
+            string += &pretty_de_bruijn(*l);
+            if parens_l {
+                string.push(')');
+            }
+
+            string.push(' ');
+
+            if parens_r {
+                string.push('(');
+            }
+            string += &pretty_de_bruijn(*r);
+            if parens_r {
+                string.push(')');
+            }
+
+            string
+        }
+        de_bruijn::Expr::AddU64(l, r) => {
+            let parens_l = match &*l {
+                de_bruijn::Expr::Lam(_) => true,
+                _ => false,
+            };
+            let parens_r = match &*r {
+                de_bruijn::Expr::Lam(_) => true,
+                de_bruijn::Expr::AddU64(_, _) => true,
+                _ => false,
+            };
+            let mut string = String::new();
+
+            if parens_l {
+                string.push('(');
+            }
+            string += &pretty_de_bruijn(*l);
+            if parens_l {
+                string.push(')');
+            }
+
+            string += " + ";
+
+            if parens_r {
+                string.push('(');
+            }
+            string += &pretty_de_bruijn(*r);
+            if parens_r {
+                string.push(')');
+            }
+
+            string
+        }
+        de_bruijn::Expr::Lam(body) => {
+            let mut string = String::from("\\");
+            string += ". ";
+            string += &pretty_de_bruijn(*body);
             string
         }
     }

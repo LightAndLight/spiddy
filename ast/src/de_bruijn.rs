@@ -101,6 +101,24 @@ impl<'expr> ExprBuilder<'expr> {
     {
         self.arena.alloc(Expr::Var(var))
     }
+
+    pub fn mk_u64<'builder>(&'builder self, var: u64) -> ExprRef<'expr>
+    where
+        'builder: 'expr,
+    {
+        self.arena.alloc(Expr::U64(var))
+    }
+
+    pub fn mk_addu64<'builder>(
+        &'builder self,
+        l: ExprRef<'expr>,
+        r: ExprRef<'expr>,
+    ) -> ExprRef<'expr>
+    where
+        'builder: 'expr,
+    {
+        self.arena.alloc(Expr::AddU64(l, r))
+    }
 }
 
 #[test]
